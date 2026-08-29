@@ -8,9 +8,9 @@ import numpy as np
 # --- CONFIGURATION ---
 DB_CONFIG = {
     "host": "82.180.143.66",
-    "user": "u263681140_students1",
+    "user": "u263681140_students",
     "password": "testStudents@123",
-    "database": "u263681140_students1"
+    "database": "u263681140_students"
 }
 
 DEFAULT_USER = "admin"
