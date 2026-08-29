@@ -6,9 +6,9 @@ import plotly.express as px
 # --- CONFIGURATION ---
 DB_CONFIG = {
     "host": "82.180.143.66",
-    "user": "u263681140_students1",
+    "user": "u263681140_students",
     "password": "testStudents@123",
-    "database": "u263681140_students1"
+    "database": "u263681140_students"
 }
 
 DEFAULT_USER = "admin"
@@ -18,16 +18,16 @@ DEFAULT_PASS = "admin123"
 def get_data():
     try:
         conn = mysql.connector.connect(**DB_CONFIG)
-        query = "SELECT * FROM WeatherForcast ORDER BY DateTime DESC"
+        query = "SELECT * FROM heart_rate ORDER BY Date_Time DESC"
         df = pd.read_sql(query, conn)
         conn.close()
         
-        # Convert numeric columns from string to float for graphing
-        numeric_cols = ['Temp', 'Humi', 'Rain', 'Moisture', 'WindSpeed']
+        # Convert numeric columns from string/decimal to float for graphing
+        numeric_cols = ['Body_temp', 'Oxygen', 'Heart_Rate', 'Temp', 'Humi']
         for col in numeric_cols:
             df[col] = pd.to_numeric(df[col], errors='coerce')
         
-        df['DateTime'] = pd.to_datetime(df['DateTime'])
+        df['Date_Time'] = pd.to_datetime(df['Date_Time'])
         return df
     except Exception as e:
         st.error(f"Error connecting to DB: {e}")
@@ -38,7 +38,7 @@ if 'logged_in' not in st.session_state:
     st.session_state['logged_in'] = False
 
 if not st.session_state['logged_in']:
-    st.title("Weather Station Login")
+    st.title("Health & Vitals Login")
     user = st.text_input("Username")
     pwd = st.text_input("Password", type="password")
     if st.button("Login"):
@@ -54,7 +54,7 @@ else:
         st.session_state['logged_in'] = False
         st.rerun()
 
-    st.title("🌤️ Weather Forecast Dashboard")
+    st.title("❤️ Heart Rate & Vitals Dashboard")
     
     df = get_data()
     
@@ -65,28 +65,30 @@ else:
             st.subheader("Most Recent Reading")
             latest = df.iloc[0]
             
-            # Displaying key metrics in columns
-            col1, col2, col3, col4 = st.columns(4)
-            col1.metric("Temperature", f"{latest['Temp']}°C")
-            col2.metric("Humidity", f"{latest['Humi']}%")
-            col3.metric("Rainfall", f"{latest['Rain']}mm")
-            col4.metric("Moisture", f"{latest['Moisture']}%")
+            # Primary vitals metrics
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Heart Rate", f"{latest['Heart_Rate']} BPM")
+            col2.metric("Oxygen (SpO2)", f"{latest['Oxygen']}%")
+            col3.metric("Body Temp", f"{latest['Body_temp']}°C")
+
+            # Environmental ambient metrics
+            col4, col5 = st.columns(2)
+            col4.metric("Ambient Temp", f"{latest['Temp']}°C")
+            col5.metric("Humidity", f"{latest['Humi']}%")
             
-            st.write(f"**Last Updated:** {latest['DateTime']}")
-            st.write(f"**Wind:** {latest['WindSpeed']} m/h ({latest['WindDirection']})")
-            st.write(f"**Sunlight:** {latest['SunLigh']}")
+            st.write(f"**Last Updated:** {latest['Date_Time']}")
 
         with tab2:
-            st.subheader("Visual Weather Trends")
+            st.subheader("Visual Vitals Trends")
             
             # Prepare data for Plotly (melting for different colors)
-            df_melted = df.melt(id_vars=['DateTime'], 
-                                value_vars=['Temp', 'Humi', 'Rain', 'Moisture', 'WindSpeed'],
+            df_melted = df.melt(id_vars=['Date_Time'], 
+                                value_vars=['Heart_Rate', 'Oxygen', 'Body_temp', 'Temp', 'Humi'],
                                 var_name='Metric', value_name='Value')
             
-            fig = px.line(df_melted, x='DateTime', y='Value', color='Metric',
-                          title="All Weather Parameters Over Time",
-                          labels={"Value": "Measurement", "DateTime": "Time"},
+            fig = px.line(df_melted, x='Date_Time', y='Value', color='Metric',
+                          title="All Vitals Parameters Over Time",
+                          labels={"Value": "Measurement", "Date_Time": "Time"},
                           template="plotly_dark")
             
             st.plotly_chart(fig, use_container_width=True)
