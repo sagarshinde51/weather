@@ -4,7 +4,7 @@ import mysql.connector
 import plotly.express as px
 from sklearn.ensemble import RandomForestClassifier
 import numpy as np
-
+import lightgbm as lgb
 # --- CONFIGURATION ---
 DB_CONFIG = {
     "host": "82.180.143.66",
