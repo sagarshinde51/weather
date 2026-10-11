@@ -32,7 +32,7 @@ def get_data():
         df = pd.read_sql(query, conn)
         conn.close()
         
-        # Convert numeric columns to float[cite: 1]
+        # Convert numeric columns to float
         numeric_cols = ['Body_temp', 'Oxygen', 'Heart_Rate', 'Temp', 'Humi']
         for col in numeric_cols:
             df[col] = pd.to_numeric(df[col], errors='coerce')
@@ -63,9 +63,16 @@ if not st.session_state['logged_in']:
 else:
     # --- MAIN APP ---
     st.sidebar.title("Navigation")
-    if st.sidebar.button("Logout"):
-        st.session_state['logged_in'] = False
-        st.rerun()
+    
+    # Sidebar Refresh & Logout Controls
+    col_sb1, col_sb2 = st.sidebar.columns(2)
+    with col_sb1:
+        if st.button("🔄 Refresh"):
+            st.rerun()
+    with col_sb2:
+        if st.button("Logout"):
+            st.session_state['logged_in'] = False
+            st.rerun()
 
     st.title("❤️ Heart Rate & Vitals Dashboard")
     
@@ -76,28 +83,34 @@ else:
 
         # ----------------------------- TAB 1: LATEST DATA -----------------------------
         with tab1:
-            st.subheader("Most Recent Reading")
+            header_col1, header_col2 = st.columns([4, 1])
+            with header_col1:
+                st.subheader("Most Recent Reading")
+            with header_col2:
+                if st.button("🔄 Refresh Data", key="tab1_refresh"):
+                    st.rerun()
+
             latest = df.iloc[0]
             
-            # Primary vitals metrics[cite: 1]
+            # Primary vitals metrics
             col1, col2, col3 = st.columns(3)
             col1.metric("Heart Rate", f"{latest['Heart_Rate']} BPM")
             col2.metric("Oxygen (SpO2)", f"{latest['Oxygen']}%")
             col3.metric("Body Temp", f"{latest['Body_temp']}°C")
 
-            # Ambient metrics and Season[cite: 1]
+            # Ambient metrics and Season
             col4, col5, col6 = st.columns(3)
             col4.metric("Ambient Temp", f"{latest['Temp']}°C")
             col5.metric("Humidity", f"{latest['Humi']}%")
             col6.metric("Season", f"{latest['Season']}")
             
-            st.write(f"**Last Updated:** {latest['Date_Time']}")
+            st.caption(f"🕒 **Last Updated from DB:** {latest['Date_Time']}")
 
         # ----------------------------- TAB 2: TRENDS & HISTORY -----------------------------
         with tab2:
             st.subheader("Visual Vitals Trends")
             
-            # Line graph for metrics over time[cite: 1]
+            # Line graph for metrics over time
             df_melted = df.melt(
                 id_vars=['Date_Time'], 
                 value_vars=['Heart_Rate', 'Oxygen', 'Body_temp', 'Temp', 'Humi'],
@@ -109,7 +122,7 @@ else:
                 df_melted, 
                 x='Date_Time', 
                 y='Value', 
-                color='Metric',
+                color='Metric', 
                 title="All Vitals Parameters Over Time",
                 labels={"Value": "Measurement", "Date_Time": "Time"},
                 template="plotly_dark"
@@ -118,7 +131,6 @@ else:
             
             st.divider()
             st.subheader("Historical Data Table")
-            # Display dataframe with the newly added 'Season' column
             st.dataframe(df, use_container_width=True)
 
         # ----------------------------- TAB 3: ATTACK PREDICTION -----------------------------
@@ -126,7 +138,6 @@ else:
             st.subheader("Seasonal Cardiac Attack Risk Prediction (LightGBM)")
             st.write("Analyze cardiac risk across seasonal profiles (Winter, Summer, Rainy) directly from database vitals.")
 
-            # Filter valid numerical entries[cite: 1]
             clean_df = df.dropna(subset=['Heart_Rate', 'Oxygen', 'Body_temp', 'Temp', 'Humi']).copy()
 
             if clean_df.empty:
@@ -163,7 +174,6 @@ else:
                 # --- Model Training Setup ---
                 features = ['Heart_Rate', 'Oxygen', 'Body_temp', 'Temp', 'Humi', 'Month']
 
-                # Synthetic baseline cases to ensure consistent multi-class fitting
                 synthetic_training_data = pd.DataFrame([
                     {'Heart_Rate': 72.0, 'Oxygen': 98.0, 'Body_temp': 36.6, 'Temp': 24.0, 'Humi': 50.0, 'Month': 4, 'Risk': 0},
                     {'Heart_Rate': 68.0, 'Oxygen': 99.0, 'Body_temp': 36.5, 'Temp': 22.0, 'Humi': 55.0, 'Month': 5, 'Risk': 0},
@@ -208,7 +218,6 @@ else:
 
                 st.markdown("#### 🩺 Latest Patient Parameters from Database")
 
-                # Highlight if current data originates from Winter
                 if current_season == "Winter":
                     st.warning("❄️ **Winter Season Detected:** Vasoconstriction and low temperatures significantly increase cardiac workload and attack vulnerability.")
                 else:
@@ -250,3 +259,5 @@ else:
                         st.info("Vitals and ambient conditions are currently within normal baseline ranges.")
     else:
         st.warning("No data found in the database.")
+        if st.button("🔄 Try Again"):
+            st.rerun()
