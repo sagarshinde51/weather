@@ -16,6 +16,8 @@ DB_CONFIG = {
 DEFAULT_USER = "admin"
 DEFAULT_PASS = "admin123"
 
+VITAL_COLS = ['Heart_Rate', 'Oxygen', 'Body_temp', 'Temp', 'Humi']
+
 # --- HELPER FUNCTIONS ---
 def get_season(month):
     if month in [11, 12, 1, 2]:
@@ -33,9 +35,9 @@ def get_data():
         conn.close()
         
         # Convert numeric columns to float
-        numeric_cols = ['Body_temp', 'Oxygen', 'Heart_Rate', 'Temp', 'Humi']
-        for col in numeric_cols:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
+        for col in VITAL_COLS:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
         
         df['Date_Time'] = pd.to_datetime(df['Date_Time'])
         
@@ -45,6 +47,28 @@ def get_data():
     except Exception as e:
         st.error(f"Error connecting to DB: {e}")
         return pd.DataFrame()
+
+def delete_invalid_records_from_db():
+    """Deletes rows where any metric is <= 0 or NULL from MySQL database."""
+    try:
+        conn = mysql.connector.connect(**DB_CONFIG)
+        cursor = conn.cursor()
+        delete_query = """
+            DELETE FROM heart_rate 
+            WHERE Heart_Rate <= 0 OR Heart_Rate IS NULL
+               OR Oxygen <= 0 OR Oxygen IS NULL
+               OR Body_temp <= 0 OR Body_temp IS NULL
+               OR Temp <= 0 OR Temp IS NULL
+               OR Humi <= 0 OR Humi IS NULL
+        """
+        cursor.execute(delete_query)
+        deleted_count = cursor.rowcount
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return True, deleted_count
+    except Exception as e:
+        return False, str(e)
 
 # --- LOGIN UI ---
 if 'logged_in' not in st.session_state:
@@ -64,7 +88,6 @@ else:
     # --- MAIN APP ---
     st.sidebar.title("Navigation")
     
-    # Sidebar Refresh & Logout Controls
     col_sb1, col_sb2 = st.sidebar.columns(2)
     with col_sb1:
         if st.button("🔄 Refresh"):
@@ -79,7 +102,13 @@ else:
     df = get_data()
     
     if not df.empty:
-        tab1, tab2, tab3 = st.tabs(["📍 Latest Data", "📊 Trends & History", "🤖 Attack Prediction"])
+        # 4 Tabs: Added Data Cleaning Tab
+        tab1, tab2, tab3, tab4 = st.tabs([
+            "📍 Latest Data", 
+            "📊 Trends & History", 
+            "🤖 Attack Prediction",
+            "🧹 Clean & Manage Data"
+        ])
 
         # ----------------------------- TAB 1: LATEST DATA -----------------------------
         with tab1:
@@ -92,13 +121,11 @@ else:
 
             latest = df.iloc[0]
             
-            # Primary vitals metrics
             col1, col2, col3 = st.columns(3)
             col1.metric("Heart Rate", f"{latest['Heart_Rate']} BPM")
             col2.metric("Oxygen (SpO2)", f"{latest['Oxygen']}%")
             col3.metric("Body Temp", f"{latest['Body_temp']}°C")
 
-            # Ambient metrics and Season
             col4, col5, col6 = st.columns(3)
             col4.metric("Ambient Temp", f"{latest['Temp']}°C")
             col5.metric("Humidity", f"{latest['Humi']}%")
@@ -110,10 +137,9 @@ else:
         with tab2:
             st.subheader("Visual Vitals Trends")
             
-            # Line graph for metrics over time
             df_melted = df.melt(
                 id_vars=['Date_Time'], 
-                value_vars=['Heart_Rate', 'Oxygen', 'Body_temp', 'Temp', 'Humi'],
+                value_vars=VITAL_COLS,
                 var_name='Metric', 
                 value_name='Value'
             )
@@ -138,10 +164,12 @@ else:
             st.subheader("Seasonal Cardiac Attack Risk Prediction (LightGBM)")
             st.write("Analyze cardiac risk across seasonal profiles (Winter, Summer, Rainy) directly from database vitals.")
 
-            clean_df = df.dropna(subset=['Heart_Rate', 'Oxygen', 'Body_temp', 'Temp', 'Humi']).copy()
+            # Filter valid numerical entries (must be > 0)
+            clean_df = df.dropna(subset=VITAL_COLS).copy()
+            clean_df = clean_df[(clean_df[VITAL_COLS] > 0).all(axis=1)]
 
             if clean_df.empty:
-                st.error("No valid readings found in the database.")
+                st.error("No valid non-zero/positive readings found in the database.")
             else:
                 clean_df['Month'] = clean_df['Date_Time'].dt.month
                 
@@ -184,7 +212,6 @@ else:
                     {'Heart_Rate': 130.0, 'Oxygen': 91.0, 'Body_temp': 39.0, 'Temp': 41.0, 'Humi': 30.0, 'Month': 5, 'Risk': 1}
                 ])
 
-                # Medical rules: cold winter stress or abnormal vitals
                 is_winter = clean_df['Season'] == "Winter"
                 extreme_temp = (clean_df['Temp'] < 16) | (clean_df['Temp'] > 38)
                 abnormal_hr = (clean_df['Heart_Rate'] > 100) | (clean_df['Heart_Rate'] < 50)
@@ -200,7 +227,6 @@ else:
                 X_train = training_pool[features]
                 y_train = training_pool['Risk']
 
-                # LightGBM Classifier
                 lgb_model = lgb.LGBMClassifier(
                     n_estimators=50,
                     learning_rate=0.05,
@@ -212,7 +238,6 @@ else:
                 )
                 lgb_model.fit(X_train, y_train)
 
-                # --- Prediction on Latest Database Value ---
                 latest_record = clean_df.iloc[0]
                 current_season = latest_record['Season']
 
@@ -257,6 +282,50 @@ else:
                     else:
                         st.success(f"✅ **Low Cardiac Risk** (Risk Probability: {prediction_prob:.2f}%)")
                         st.info("Vitals and ambient conditions are currently within normal baseline ranges.")
+
+        # ----------------------------- TAB 4: CLEAN & MANAGE DATA -----------------------------
+        with tab4:
+            st.subheader("🧹 Filter & Purge Invalid Sensor Data")
+            st.write("Detect and delete rows with zero (`0`), negative values (`< 0`), or corrupted `NaN` readings from your MySQL database.")
+
+            # Identify rows where any vital metric is <= 0 or null
+            invalid_mask = (df[VITAL_COLS] <= 0).any(axis=1) | df[VITAL_COLS].isna().any(axis=1)
+            invalid_df = df[invalid_mask]
+            valid_df = df[~invalid_mask]
+
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Total Database Rows", len(df))
+            m2.metric("Invalid Records (<= 0 or NaN)", len(invalid_df), delta=-len(invalid_df), delta_color="inverse")
+            m3.metric("Clean Records", len(valid_df))
+
+            st.divider()
+
+            if not invalid_df.empty:
+                st.warning(f"⚠️ Found **{len(invalid_df)}** records with non-positive (<= 0) or missing values.")
+                
+                with st.expander("👀 View Invalid Records to Delete", expanded=True):
+                    st.dataframe(invalid_df, use_container_width=True)
+
+                st.subheader("Delete Invalid Records")
+                st.markdown("This will permanently execute a `DELETE` query on your MySQL `heart_rate` table for rows where any reading is `<= 0` or empty.")
+
+                confirm_delete = st.checkbox("⚠️ Yes, I confirm I want to permanently delete these rows from MySQL")
+
+                if st.button("🗑️ Delete Invalid Rows from MySQL", type="primary", disabled=not confirm_delete):
+                    with st.spinner("Deleting records from database..."):
+                        success, result = delete_invalid_records_from_db()
+                        if success:
+                            st.success(f"✅ Successfully deleted {result} invalid rows from MySQL!")
+                            st.rerun()
+                        else:
+                            st.error(f"❌ Failed to delete records: {result}")
+            else:
+                st.success("🎉 All records in the database are valid! No zero or negative vitals found.")
+                
+            st.divider()
+            with st.expander("📊 Preview Cleaned Dataset Only"):
+                st.dataframe(valid_df, use_container_width=True)
+
     else:
         st.warning("No data found in the database.")
         if st.button("🔄 Try Again"):
